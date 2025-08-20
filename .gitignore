@@ -1,2 +1,20 @@
-./.env
-./vector_store
+# Environment files
+.env
+*.env
+
+# Vector store artifacts
+vector_store/
+
+# Python cache and build
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Editors/OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Notebooks
+.ipynb_checkpoints/
