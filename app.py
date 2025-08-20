@@ -48,12 +48,6 @@ if "vs_ready" not in st.session_state:
     st.session_state.vs_ready = False
 if "last_response" not in st.session_state:
     st.session_state.last_response = None
-# NEW: chat history and chunk count
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "num_chunks" not in st.session_state:
-    st.session_state.num_chunks = 0
-
 
 def get_pdf_text(pdf_docs):
     text = ""
@@ -64,13 +58,11 @@ def get_pdf_text(pdf_docs):
             text += extracted + "\n"
     return text
 
-
-def get_text_chunks(text, chunk_size=1500, chunk_overlap=200):
+def get_text_chunks(text):
     # USE: RecursiveCharacterTextSplitter from fixed import
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
     chunks = text_splitter.split_text(text)
     return chunks
-
 
 def get_vector_store(chunks):
     embeddings = GoogleGenerativeAIEmbeddings(
@@ -107,7 +99,6 @@ def user_input(user_question):
     # Return the text so the UI can render it nicely
     return response['output_text']
 
-
 def main():
     # Header
     st.markdown('<div class="app-title">📚 PDF Question Answering</div>', unsafe_allow_html=True)
@@ -117,26 +108,12 @@ def main():
     with st.sidebar:
         st.header("1) Upload & Process")
         pdf_docs = st.file_uploader("Upload PDF files", type="pdf", accept_multiple_files=True)
-
-        # NEW: Advanced processing options
-        with st.expander("Advanced options", expanded=False):
-            chunk_size = st.number_input(
-                "Chunk size", min_value=500, max_value=8000, value=1500, step=100,
-                help="Size of each text chunk sent to the vector store."
-            )
-            chunk_overlap = st.number_input(
-                "Chunk overlap", min_value=0, max_value=1000, value=200, step=50,
-                help="Overlap between consecutive chunks to preserve context."
-            )
-
         process = st.button("Process documents", use_container_width=True, disabled=not pdf_docs)
         clear_vs = st.button("Clear vector store", use_container_width=True)
 
         if clear_vs:
             st.session_state.vs_ready = False
             st.session_state.last_response = None
-            st.session_state.messages = []  # clear chat too
-            st.session_state.num_chunks = 0
             import shutil
             shutil.rmtree("vector_store", ignore_errors=True)
             st.success("Cleared local vector store.")
@@ -145,12 +122,10 @@ def main():
             with st.spinner("Reading and indexing PDFs..."):
                 try:
                     text = get_pdf_text(pdf_docs)
-                    chunks = get_text_chunks(text, chunk_size, chunk_overlap)  # use options
+                    chunks = get_text_chunks(text)
                     get_vector_store(chunks)
                     st.session_state.vs_ready = True
-                    st.session_state.num_chunks = len(chunks)  # display stats
                     st.success("Vector store ready.")
-                    st.toast("Indexing complete. You can start asking questions!")
                 except Exception as e:
                     st.session_state.vs_ready = False
                     st.error(f"Failed to process PDFs: {e}")
@@ -162,42 +137,34 @@ def main():
     # Main interaction
     col_q, col_info = st.columns([3, 2])
     with col_q:
-        # NEW: Chat-style interface
+        q = st.text_input(
+            "Ask a question",
+            placeholder="e.g., What are the main conclusions in the documents?",
+            disabled=not st.session_state.vs_ready
+        )
+        ask = st.button("Ask", type="primary", disabled=not st.session_state.vs_ready)
+
         if not st.session_state.vs_ready:
             st.info("Upload and process PDFs in the sidebar to enable questions.")
 
-        # Clear chat button
-        clear_chat = st.button("Clear chat", help="Remove chat history from this session.", disabled=len(st.session_state.messages) == 0)
-        if clear_chat:
-            st.session_state.messages = []
+        if ask and q:
+            with st.spinner("Thinking..."):
+                try:
+                    answer = user_input(q)
+                    st.session_state.last_response = answer
+                except Exception as e:
+                    st.error(f"Error while answering: {e}")
+                    st.session_state.last_response = None
 
-        # Render chat history
-        for msg in st.session_state.messages:
-            with st.chat_message(msg["role"]):
-                st.markdown(msg["content"], unsafe_allow_html=True)
-
-        # Chat input
-        if st.session_state.vs_ready:
-            prompt = st.chat_input("Ask a question about your documents")
-            if prompt:
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("assistant"):
-                    with st.spinner("Thinking..."):
-                        try:
-                            answer = user_input(prompt)
-                            st.session_state.last_response = answer
-                            st.session_state.messages.append({"role": "assistant", "content": answer})
-                            st.markdown(answer, unsafe_allow_html=True)
-                        except Exception as e:
-                            st.error(f"Error while answering: {e}")
-                            st.session_state.last_response = None
+        if st.session_state.last_response:
+            st.markdown("**Answer**")
+            st.markdown(f'<div class="response">{st.session_state.last_response}</div>', unsafe_allow_html=True)
 
     with col_info:
         st.markdown('<div class="panel">', unsafe_allow_html=True)
         st.markdown("**Status**")
         st.write("Vector store:", "Ready ✅" if st.session_state.vs_ready else "Not ready ❌")
-        st.write("Chunks indexed:", st.session_state.num_chunks if st.session_state.vs_ready else "-")
-        st.markdown('<span class="small">Tip: You can tweak chunking in Advanced options for better answers.</span>', unsafe_allow_html=True)
+        st.markdown('<span class="small">Tip: You can clear and reprocess documents from the sidebar.</span>', unsafe_allow_html=True)
         st.markdown('</div>', unsafe_allow_html=True)
 
 # Run
